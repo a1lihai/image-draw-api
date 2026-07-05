@@ -1,0 +1,6 @@
+# 修复致命报错：删除 hmac、hashlib！二者属于Python系统内置库，pip无法安装，是报红根源
+fastapi
+uvicorn[standard]
+python-dotenv
+requests
+pydantic
