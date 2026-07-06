@@ -238,11 +238,10 @@ class ModelAdapter:
         k_sign = hmac_256(k_service, "request")
         final_signature = hmac.new(k_sign, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
-        credential_segment = f"Credential={cfg['ak']}/{scope}"
+        credential_segment = "Credential=" + cfg['ak'] + "/cn-beijing/cv/request"
         signed_header_segment = f"SignedHeaders={signed_header_keys}"
         signature_segment = f"Signature={final_signature}"
-        auth_header_value = f"HMAC-SHA256 {credential_segment},{signed_header_segment},{signature_segment}"
-
+        auth_header_value = f"HMAC-SHA256     {credential_segment},SignedHeaders={signed_header_keys},Signature={final_signature}"
         headers = {
             "content-type": "application/json; charset=utf-8",
             "x-content-sha256": body_sha256,
