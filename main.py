@@ -1,39 +1,23 @@
-import os
 import time
 import logging
 import requests
 import json
 from typing import Optional, List, Dict, Any, Union
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
-from pathlib import Path
+from pydantic import BaseModel, Field, model_validator
 
-# 强制加载.env配置文件
-from dotenv import load_dotenv
-import os
-# 固定完整路径
-env_path = "/home/l95492/.env"
-load_dotenv("/home/l95492/.env")
 # 日志基础配置
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("super-ai-gateway")
-
-# 启动打印密钥调试信息
-print("===== 读取到的即梦配置 =====")
-print(".env文件是否存在：", os.path.exists(env_path))
-print("JIMENG_AK:", repr(os.getenv("JIMENG_AK")))
-print("JIMENG_SK:", repr(os.getenv("JIMENG_SK")))
-print("JIMENG_REQ_KEY:", repr(os.getenv("JIMENG_REQ_KEY")))
-print("==========================")
 
 # FastAPI实例
 app = FastAPI(title="智聚AI | 超级聚合引擎", version="2.0")
 app.mount("/static", StaticFiles(directory="."), name="static")
 
 # 全局环境变量统一读取
+import os
 CONF = {
     # 文本对话模型
     "doubao": {
@@ -77,20 +61,42 @@ class UnifiedChatReq(BaseModel):
     temperature: float = Field(default=0.7, ge=0, le=1)
     max_tokens: int = Field(default=1024, gt=0)
 
-# AI绘图入参
+# AI绘图入参【修复：兼容前端model_type、width、height】
 class UnifiedImageReq(BaseModel):
-    draw_type: str = Field(..., description="wenxin=文心一格｜jimeng=即梦AI")
+    # 前端传 model_type，后端自动转为 draw_type
+    model_type: Optional[str] = None
+    draw_type: Optional[str] = None
     prompt: str
     negative_prompt: str = Field(default="模糊,低画质,畸形,水印,文字,丑脸,多余肢体")
-    size: str = Field(default="768x768")
+    # 前端自由输入宽高
+    width: Optional[int] = None
+    height: Optional[int] = None
+    size: Optional[str] = None
     num: int = Field(default=1, ge=1, le=4)
+
+    # 自动转换前端参数
+    @model_validator(mode="before")
+    def transform_fields(cls, values):
+        # 前端 model_type 赋值给 draw_type
+        if values.get("model_type") and not values.get("draw_type"):
+            values["draw_type"] = values["model_type"]
+        # 前端传 width+height，自动拼接 size
+        w = values.get("width")
+        h = values.get("height")
+        if w and h and not values.get("size"):
+            values["size"] = f"{w}x{h}"
+        # 必须有绘图模型标识
+        if not values.get("draw_type"):
+            raise ValueError("必须传入 model_type / draw_type，仅支持 wenxin / jimeng")
+        return values
 
 # 统一返回格式
 class UnifiedChatResp(BaseModel):
     code: int
     msg: str
     data: Dict[str, Any]
-    # -------------------------- 模型调度适配器（统一4空格缩进） --------------------------
+
+# -------------------------- 模型调度适配器 --------------------------
 class ModelAdapter:
     # 豆包对话接口
     @staticmethod
@@ -166,30 +172,26 @@ class ModelAdapter:
             raise Exception(json_data.get("error_msg"))
         return [item["url"] for item in json_data["data"]]
 
-    # 即梦AI绘图｜修复时间缓存、完整V4签名，统一4空格缩进
+    # 即梦AI绘图 V4签名
     @staticmethod
     def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
         import hmac
         import hashlib
         import json
-        import requests
         from datetime import datetime
 
-        # 仅使用本机原生UTC，禁止任何手动替换时间戳（符合V4签名规范）
         server_utc = datetime.utcnow()
         x_date = server_utc.strftime("%Y%m%dT%H:%M:%SZ")
         date_short = server_utc.strftime("%Y%m%d")
 
         cfg = CONF["jimeng"]
         host = "visual.volcengineapi.com"
-        # 更换为新一代宽校验窗口接口 CVProcess
         action = "CVProcess"
         version = "2018-08-01"
         url = f"https://{host}?Action={action}&Version={version}"
         service = "cv"
         region = "cn-north-1"
 
-        # CVProcess标准嵌套入参（必须外层包裹StableDiffusion）
         body = {
             "ReqKey": cfg["req_key"],
             "StableDiffusion": {
@@ -243,14 +245,15 @@ class ModelAdapter:
 
         resp = requests.post(url, headers=headers, data=body_json, timeout=120)
         res_json = resp.json()
-        logger.info(f"【本机原生UTC】{x_date} | CVProcess返回：{res_json}")
+        logger.info(f"【即梦返回日志】{x_date} | {res_json}")
         meta = res_json.get("ResponseMetadata", {})
         err = meta.get("Error")
         if err:
             raise Exception(f"接口报错：{err['Code']} {err['Message']}")
-        # 图片路径同步修改为CVProcess返回结构
         img_list = [item["ImageUrl"] for item in res_json["Result"]["StableDiffusion"]["Images"]]
-        return img_list                                                                                  # -------------------------- 业务API接口 --------------------------
+        return img_list
+
+# -------------------------- 业务API接口 --------------------------
 # 首页前端页面
 @app.get("/")
 async def index_page():
@@ -321,4 +324,4 @@ def health():
 # 服务启动入口
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=False)

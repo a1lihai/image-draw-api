@@ -69,20 +69,24 @@
                         prompt: prompt,
                         width: 832,
                         height: 1216,
-                        draw_type: "general_v2",
-                        model_type: "jimeng"
-                    })
-                })
-                const data = await res.json();
-                if(data.data?.image_url) {
-                    imgBox.innerHTML = `<img src="${data.data.image_url}" />`;
-                } else {
-                    imgBox.innerHTML = "生成失败：" + JSON.stringify(data);
-                }
-            } catch(e) {
-                imgBox.innerHTML = "网络请求错误：" + e;
-            }
-        }
-    </script>
+                        model_type: "jimeng",
+                        num: 1
+                   })
+               })
+               const data = await res.json();
+              if(data.data?.image_urls) {
+                  let html = "";
+                  data.data.image_urls.forEach(url=>{
+                      html += `<img src="${url}" style="max-width:100%;margin:4px 0">`
+                  })
+                  imgBox.innerHTML = html;
+              } else {
+                  imgBox.innerHTML = "生成失败：" + JSON.stringify(data);
+              }
+          } catch(e) {
+              imgBox.innerHTML = "网络请求错误：" + e;
+          }
+     }
+</script>
 </body>
 </html>
