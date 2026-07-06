@@ -201,12 +201,12 @@ class ModelAdapter:
         method = "POST"
         uri = "/"
         query = f"Action={action}&Version={version}"
-        headers_raw = "content-type:application/json; charset=utf-8\nhost:" + host + "\nx-content-sha256:" + payload_sha256 + "\nx-date:" + x_date + "\n"
+        headers_raw = "content-type:application/json; charset=utf-8\nhost:" + host + "\nx-content-  sha256:" + payload_sha256 + "\nx-date:" + x_date + "\n"
         signed_headers = "content-type;host;x-content-sha256;x-date"
-        canonical_req = method + "\n" + uri + "\n" + query + "\n" + headers_raw + "\n" + signed_headers + "\n" + payload_sha256
+        canonical_req = method + "\n" + uri + "\n" + query + "\n" + headers_raw + "\n" +    signed_headers + "\n" + payload_sha256
 
         cr_sha256 = hashlib.sha256(canonical_req.encode("utf-8")).hexdigest()
-        scope = date_short + "/" + region + "/" + service + "/request"
+        scope = f"{date_short}/{region}/{service}/request"
         string_to_sign = "HMAC-SHA256\n" + x_date + "\n" + scope + "\n" + cr_sha256
 
         def hmac_sha256(key, msg):
@@ -218,8 +218,11 @@ class ModelAdapter:
         k_signing = hmac_sha256(k_service, "request")
         sig = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
-        # 核心修复：auth单行拼接，逗号前后完全无空格，杜绝空白字符报错
-        auth = "HMAC-SHA256 Credential=" + cfg['ak'] + "/" + scope + ",SignedHeaders=" + signed_headers + ",Signature=" + sig
+        # 强制分段拼接，每个部分独立字符串，杜绝斜杠丢失
+        cred_part = "Credential=" + cfg['ak'] + "/" + scope
+        sign_header_part = "SignedHeaders=" + signed_headers
+        sign_part = "Signature=" + sig
+        auth = "HMAC-SHA256 " + cred_part + "," + sign_header_part + "," + sign_part
 
         headers = {
             "content-type": "application/json; charset=utf-8",
