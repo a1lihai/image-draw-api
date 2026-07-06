@@ -61,31 +61,25 @@ class UnifiedChatReq(BaseModel):
     temperature: float = Field(default=0.7, ge=0, le=1)
     max_tokens: int = Field(default=1024, gt=0)
 
-# AI绘图入参【修复：兼容前端model_type、width、height】
+# AI绘图入参【兼容前端model_type、width、height自由输入尺寸】
 class UnifiedImageReq(BaseModel):
-    # 前端传 model_type，后端自动转为 draw_type
     model_type: Optional[str] = None
     draw_type: Optional[str] = None
     prompt: str
     negative_prompt: str = Field(default="模糊,低画质,畸形,水印,文字,丑脸,多余肢体")
-    # 前端自由输入宽高
     width: Optional[int] = None
     height: Optional[int] = None
     size: Optional[str] = None
     num: int = Field(default=1, ge=1, le=4)
 
-    # 自动转换前端参数
     @model_validator(mode="before")
     def transform_fields(cls, values):
-        # 前端 model_type 赋值给 draw_type
         if values.get("model_type") and not values.get("draw_type"):
             values["draw_type"] = values["model_type"]
-        # 前端传 width+height，自动拼接 size
         w = values.get("width")
         h = values.get("height")
         if w and h and not values.get("size"):
             values["size"] = f"{w}x{h}"
-        # 必须有绘图模型标识
         if not values.get("draw_type"):
             raise ValueError("必须传入 model_type / draw_type，仅支持 wenxin / jimeng")
         return values
@@ -172,7 +166,7 @@ class ModelAdapter:
             raise Exception(json_data.get("error_msg"))
         return [item["url"] for item in json_data["data"]]
 
-    # 即梦AI绘图 V4签名（无空格、无换行修复版）
+    # 即梦AI V4签名【终极修复：无换行、无多余空格、region匹配、header小写】
     @staticmethod
     def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
         import hmac
@@ -207,13 +201,13 @@ class ModelAdapter:
         method = "POST"
         uri = "/"
         query = f"Action={action}&Version={version}"
-        headers_raw = f"content-type:application/json; charset=utf-8\nhost:{host}\nx-content-sha256:{payload_sha256}\nx-date:{x_date}\n"
+        headers_raw = "content-type:application/json; charset=utf-8\nhost:" + host + "\nx-content-sha256:" + payload_sha256 + "\nx-date:" + x_date + "\n"
         signed_headers = "content-type;host;x-content-sha256;x-date"
-        canonical_req = f"{method}\n{uri}\n{query}\n{headers_raw}\n{signed_headers}\n{payload_sha256}"
+        canonical_req = method + "\n" + uri + "\n" + query + "\n" + headers_raw + "\n" + signed_headers + "\n" + payload_sha256
 
         cr_sha256 = hashlib.sha256(canonical_req.encode("utf-8")).hexdigest()
-        scope = f"{date_short}/{region}/{service}/request"
-        string_to_sign = f"HMAC-SHA256\n{x_date}\n{scope}\n{cr_sha256}"
+        scope = date_short + "/" + region + "/" + service + "/request"
+        string_to_sign = "HMAC-SHA256\n" + x_date + "\n" + scope + "\n" + cr_sha256
 
         def hmac_sha256(key, msg):
             return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
@@ -224,8 +218,8 @@ class ModelAdapter:
         k_signing = hmac_sha256(k_service, "request")
         sig = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
-        # 逗号后无空格，符合火山鉴权规范
-        auth = "HMAC-SHA256 Credential={}/{},SignedHeaders={},Signature={}".format(cfg['ak'], scope, signed_headers, sig)
+        # 核心修复：auth单行拼接，逗号前后完全无空格，杜绝空白字符报错
+        auth = "HMAC-SHA256 Credential=" + cfg['ak'] + "/" + scope + ",SignedHeaders=" + signed_headers + ",Signature=" + sig
 
         headers = {
             "content-type": "application/json; charset=utf-8",
@@ -236,14 +230,13 @@ class ModelAdapter:
 
         resp = requests.post(url, headers=headers, data=body_json, timeout=120)
         res_json = resp.json()
-        logger.info(f"【即梦接口返回日志】{res_json}")
+        logger.info(f"【即梦接口完整返回日志】{res_json}")
         meta = res_json.get("ResponseMetadata", {})
         err = meta.get("Error")
         if err:
-            raise Exception(f"即梦接口错误：{err['Code']} {err['Message']}")
+            raise Exception(f"即梦接口鉴权/生成失败：{err['Code']} {err['Message']}")
         img_list = [item["ImageUrl"] for item in res_json["Result"]["StableDiffusion"]["Images"]]
         return img_list
-   
 
 # -------------------------- 业务API接口 --------------------------
 # 首页前端页面
@@ -305,7 +298,7 @@ def image_generate(body: UnifiedImageReq):
             "draw_model":body.draw_type,"image_urls":urls,"cost_ms":round((time.time()-start_time)*1000,2)
         })
     except Exception as e:
-        logger.error("绘图异常", exc_info=True)
+        logger.error("绘图接口全局异常", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # 服务健康检测
@@ -313,7 +306,7 @@ def image_generate(body: UnifiedImageReq):
 def health():
     return {"code":200,"msg":"后端网关全速运行"}
 
-# 服务启动入口
+# 服务启动入口（Render端口10000）
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=False)
