@@ -44,7 +44,6 @@
             if(!text) return;
             addMsg("user", text);
             document.getElementById("chatInput").value = "";
-            // 这里你后续完善对话接口，先占位
             addMsg("bot", "对话接口待完善");
         }
         function addMsg(type, text) {
@@ -56,7 +55,7 @@
             list.scrollTop = list.scrollHeight;
         }
 
-        // 生成图片
+        // 生成图片（已补全model_type修复400报错）
         async function genImage() {
             const prompt = document.getElementById("drawInput").value.trim();
             if(!prompt) return;
@@ -70,7 +69,7 @@
                         prompt: prompt,
                         width: 832,
                         height: 1216,
-                        draw_type: "general_v2"
+                        draw_type: "general_v2",
                         model_type: "jimeng"
                     })
                 })
@@ -81,7 +80,7 @@
                     imgBox.innerHTML = "生成失败：" + JSON.stringify(data);
                 }
             } catch(e) {
-                imgBox.innerHTML = "网络错误";
+                imgBox.innerHTML = "网络请求错误：" + e;
             }
         }
     </script>
