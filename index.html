@@ -2,314 +2,86 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智聚AI｜全能聚合引擎｜超越模库AI</title>
-    <!-- 【修复境外CDN无法访问】替换全部国内镜像，彻底解决网页解析失败、图标加载空白 -->
-    <script src="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.16/dist/tailwind.min.css"></script>
-    <!-- 本地内嵌图标，删掉失效境外font-awesome外网链接，解决境外网页拦截报错 -->
+    <title>AI绘图对话工具</title>
     <style>
-        /* 内嵌全部软件所需图标，无需外网，百分百加载成功 */
-        .fa-cube::before{content:"◼";}
-        .fa-cog::before{content:"⚙";}
-        .fa-history::before{content:"🕒";}
-        .fa-paper-plane::before{content:"➤";}
-        .fa-magic::before{content:"✨";}
-        .fa-columns::before{content:"▤";}
-        .fa-bolt::before{content:"⚡";}
-        .fa-code::before{content:"</>";}
-        .fa-cloud::before{content:"☁";}
-        .fa-fire::before{content:"🔥";}
-        .fa-paint-brush::before{content:"🖌";}
-        .fa-key::before{content:"🔑";}
-        .fa-comment-o::before{content:"💬";}
-        .fa-picture-o::before{content:"🖼";}
-        .fa-comments::before{content:"🗨";}
-        .fa-spin{animation:spin 1s linear infinite;}
-        @keyframes spin{100%{transform:rotate(360deg);}}
-        i{font-style:normal;}
-    </style>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#165DFF',
-                        darkBg: '#0d1117',
-                        darkCard: '#161b22',
-                        darkBorder: '#30363d',
-                        successGreen: '#238636',
-                        warnOrange: '#d29922'
-                    },
-                    fontFamily: {
-                        sans: ['system-ui']
-                    }
-                }
-            }
-        }
-    </script>
-    <style type="text/tailwindcss">
-        @layer utilities {
-            .scroll-hide::-webkit-scrollbar {display: none;}
-            .btn-glow {box-shadow: 0 0 14px #165DFF60;}
-            .card-hover:hover {border-color:#165DFF;transform: translateY(-2px);transition: all 0.25s ease;}
-        }
+        * {margin:0; padding:0; box-sizing:border-box; font-family:system-ui}
+        body {background:#f5f7fa; display:flex; height:100vh; gap:20px; padding:20px}
+        .chat-box {width:45%; background:#fff; border-radius:12px; padding:16px; display:flex; flex-direction:column}
+        .draw-box {width:45%; background:#fff; border-radius:12px; padding:16px; display:flex; flex-direction:column}
+        .msg-list {flex:1; overflow:auto; border:1px solid #eee; border-radius:8px; padding:10px; margin-bottom:12px}
+        .msg {margin:6px 0; padding:8px 12px; border-radius:8px; max-width:80%}
+        .user {background:#0088ff; color:#fff; margin-left:auto}
+        .bot {background:#eef2f7; color:#111; margin-right:auto}
+        textarea {width:100%; height:80px; padding:10px; border:1px solid #ddd; border-radius:8px; resize:none}
+        button {margin-top:8px; padding:10px 20px; background:#0088ff; color:white; border:none; border-radius:8px; cursor:pointer}
+        #img-box {flex:1; border:1px solid #eee; border-radius:8px; margin-bottom:12px; padding:10px; overflow:auto}
+        img {max-width:100%; border-radius:6px}
     </style>
 </head>
-<body class="bg-darkBg text-gray-100 h-screen overflow-hidden flex flex-col">
-    <!-- 顶部导航栏｜全部按钮+图标设计完毕 -->
-    <header class="h-14 bg-darkCard border-b border-darkBorder flex items-center px-5 justify-between z-50">
-        <!-- 左侧LOGO -->
-        <div class="flex items-center gap-2">
-            <i class="fa fa-cube text-primary text-xl"></i>
-            <span class="text-lg font-bold">智聚AI｜超级聚合引擎</span>
-        </div>
-        <!-- 顶部功能按钮｜图标配套用途一一对应 -->
-        <div class="flex items-center gap-4">
-            <button id="btnSetting" class="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-darkBorder hover:bg-primary/20 transition-all">
-                <i class="fa fa-cog"></i>
-                <span>密钥配置</span>
-            </button>
-            <button class="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-darkBorder hover:bg-primary/20 transition-all">
-                <i class="fa fa-history"></i>
-                <span>对话记录</span>
-            </button>
-        </div>
-    </header>
+<body>
+    <!-- 对话窗口 -->
+    <div class="chat-box">
+        <h3>AI对话</h3>
+        <div class="msg-list" id="chatList"></div>
+        <textarea id="chatInput" placeholder="输入对话内容..."></textarea>
+        <button onclick="sendChat()">发送对话</button>
+    </div>
 
-    <!-- 主体页面｜左右布局 -->
-    <main class="flex flex-1 overflow-hidden">
-        <!-- 左侧侧边栏｜模型选择面板 -->
-        <aside class="w-56 bg-darkCard border-r border-darkBorder p-3 flex flex-col gap-4">
-            <!-- 文本对话模块 -->
-            <div>
-                <h3 class="text-gray-400 text-sm mb-2 flex items-center gap-1">
-                    <i class="fa fa-comments"></i>文本大模型
-                </h3>
-                <div class="flex flex-col gap-2">
-                    <label class="model-item flex items-center gap-2 p-2 rounded bg-darkBorder card-hover cursor-pointer">
-                        <input type="radio" name="chatModel" value="doubao" checked class="accent-primary">
-                        <i class="fa fa-bolt text-amber-400"></i>豆包大模型
-                    </label>
-                    <label class="model-item flex items-center gap-2 p-2 rounded bg-darkBorder card-hover cursor-pointer">
-                        <input type="radio" name="chatModel" value="deepseek" class="accent-primary">
-                        <i class="fa fa-code text-blue-400"></i>DeepSeek
-                    </label>
-                    <label class="model-item flex items-center gap-2 p-2 rounded bg-darkBorder card-hover cursor-pointer">
-                        <input type="radio" name="chatModel" value="qwen" class="accent-primary">
-                        <i class="fa fa-cloud text-cyan-400"></i>通义千问
-                    </label>
-                    <label class="model-item flex items-center gap-2 p-2 rounded bg-darkBorder card-hover cursor-pointer">
-                        <input type="radio" name="chatModel" value="batch" class="accent-primary">
-                        <i class="fa fa-columns text-green-400"></i>✅多模型并行对比
-                    </label>
-                </div>
-            </div>
-            <!-- AI绘图模块 -->
-            <div>
-                <h3 class="text-gray-400 text-sm mb-2 flex items-center gap-1">
-                    <i class="fa fa-picture-o"></i>AI绘图模型
-                </h3>
-                <div class="flex flex-col gap-2">
-                    <label class="draw-item flex items-center gap-2 p-2 rounded bg-darkBorder card-hover cursor-pointer">
-                        <input type="radio" name="drawModel" value="jimeng" checked class="accent-primary">
-                        <i class="fa fa-fire text-rose-400"></i>即梦AI（字节）
-                    </label>
-                    <label class="draw-item flex items-center gap-2 p-2 rounded bg-darkBorder card-hover cursor-pointer">
-                        <input type="radio" name="drawModel" value="wenxin" class="accent-primary">
-                        <i class="fa fa-paint-brush text-violet-400"></i>文心一格（百度）
-                    </label>
-                </div>
-            </div>
-            <!-- 模式切换tab -->
-            <div class="mt-auto pb-4">
-                <button id="tabChat" class="w-full py-2 rounded bg-primary btn-glow mb-2">💬 对话模式</button>
-                <button id="tabDraw" class="w-full py-2 rounded bg-darkBorder hover:bg-primary/20">🎨 绘图模式</button>
-            </div>
-        </aside>
-
-        <!-- 主内容区 -->
-        <section class="flex-1 overflow-auto scroll-hide p-4">
-            <!-- 对话页面 -->
-            <div id="chatPage" class="h-full flex flex-col">
-                <div id="chatBox" class="flex-1 overflow-auto scroll-hide rounded-lg bg-darkCard p-4 mb-4 border border-darkBorder">
-                    <div class="text-center text-gray-500 mt-20">
-                        <i class="fa fa-comment-o text-4xl mb-2"></i>
-                        <p>输入提问，开启AI对话｜支持三模型并行对比</p>
-                    </div>
-                </div>
-                <div class="flex gap-3">
-                    <textarea id="chatInput" class="flex-1 bg-darkCard border border-darkBorder rounded-lg p-3 h-20 resize-none outline-none focus:border-primary" placeholder="输入提问内容..."></textarea>
-                    <button id="sendChat" class="px-6 rounded-lg bg-primary btn-glow hover:bg-primary/90 transition-all">
-                        <i class="fa fa-paper-plane"></i> 发送
-                    </button>
-                </div>
-            </div>
-
-            <!-- 绘图页面｜默认隐藏 -->
-            <div id="drawPage" class="h-full hidden flex-col">
-                <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                        <label class="text-gray-400 text-sm">正向提示词（画面描述）</label>
-                        <textarea id="posPrompt" class="w-full bg-darkCard border border-darkBorder rounded-lg p-3 h-24 mt-1 resize-none outline-none focus:border-primary" placeholder="例如：日系二次元少女，海边落日，高清画质，氛围感拉满"></textarea>
-                    </div>
-                    <div>
-                        <label class="text-gray-400 text-sm">反向提示词（规避瑕疵）</label>
-                        <textarea id="negPrompt" class="w-full bg-darkCard border border-darkBorder rounded-lg p-3 h-24 mt-1 resize-none outline-none focus:border-primary" placeholder="模糊，水印，文字，畸形，低画质">模糊,低画质,畸形,水印,文字</textarea>
-                    </div>
-                </div>
-                <div class="flex gap-4 mb-4 items-center">
-                    <div>
-                        <label class="text-gray-400 text-sm">图片尺寸</label>
-                        <select id="imgSize" class="bg-darkCard border border-darkBorder rounded px-3 py-2 mt-1 outline-none">
-                            <option value="768x768">768×768 正方形</option>
-                            <option value="1024x1024">1024×1024 超清</option>
-                            <option value="768x1024">竖版长图</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="text-gray-400 text-sm">生成数量</label>
-                        <select id="imgNum" class="bg-darkCard border border-darkBorder rounded px-3 py-2 mt-1 outline-none">
-                            <option value="1">1张</option>
-                            <option value="2">2张</option>
-                            <option value="4">4张</option>
-                        </select>
-                    </div>
-                    <button id="genImgBtn" class="px-6 py-2 rounded-lg bg-primary btn-glow mt-5 hover:bg-primary/90">
-                        <i class="fa fa-magic"></i> 一键生成绘图
-                    </button>
-                </div>
-                <div id="imgResultBox" class="flex-1 rounded-lg bg-darkCard border border-darkBorder p-4 overflow-auto scroll-hide">
-                    <div class="text-center text-gray-500 mt-16">
-                        <i class="fa fa-picture-o text-4xl mb-2"></i>
-                        <p>填写提示词，生成AI艺术图片</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-    </main>
-
-    <!-- 弹窗：密钥配置窗口｜完整弹窗样式、关闭动画 -->
-    <div id="settingModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
-        <div class="bg-darkCard w-[520px] rounded-xl border border-darkBorder p-5 shadow-2xl">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold"><i class="fa fa-key text-warnOrange"></i> 模型密钥配置</h3>
-                <button id="closeModal" class="text-gray-400 hover:text-white text-xl">&times;</button>
-            </div>
-            <p class="text-gray-400 text-sm mb-3">密钥填写至本地.env文件，此处仅展示指引，保护密钥安全</p>
-            <div class="text-sm text-gray-300 space-y-1 bg-darkBg p-3 rounded-lg">
-                <p>✅ 豆包｜火山方舟：ARK平台API Key+模型ID</p>
-                <p>✅ 通义千问：阿里云AccessKey</p>
-                <p>✅ 即梦AI：火山IAM AK/SK（你已拿到）</p>
-                <p>✅ 文心一格：百度千帆API+Secret Key</p>
-            </div>
-        </div>
+    <!-- 绘图窗口 -->
+    <div class="draw-box">
+        <h3>AI生图</h3>
+        <div id="img-box"></div>
+        <textarea id="drawInput" placeholder="输入绘图提示词"></textarea>
+        <button onclick="genImage()">一键生成图片</button>
     </div>
 
     <script>
-        // 页面切换逻辑
-        const tabChat = document.getElementById('tabChat');
-        const tabDraw = document.getElementById('tabDraw');
-        const chatPage = document.getElementById('chatPage');
-        const drawPage = document.getElementById('drawPage');
+        const API_HOST = "https://image-draw-api.onrender.com";
 
-        tabChat.onclick = function(){
-            tabChat.className = "w-full py-2 rounded bg-primary btn-glow mb-2";
-            tabDraw.className = "w-full py-2 rounded bg-darkBorder hover:bg-primary/20";
-            chatPage.classList.remove('hidden');
-            chatPage.classList.add('flex');
-            drawPage.classList.add('hidden');
-            drawPage.classList.remove('flex');
+        // 对话发送
+        async function sendChat() {
+            const text = document.getElementById("chatInput").value.trim();
+            if(!text) return;
+            addMsg("user", text);
+            document.getElementById("chatInput").value = "";
+            // 这里你后续完善对话接口，先占位
+            addMsg("bot", "对话接口待完善");
         }
-        tabDraw.onclick = function(){
-            tabDraw.className = "w-full py-2 rounded bg-primary btn-glow mb-2";
-            tabChat.className = "w-full py-2 rounded bg-darkBorder hover:bg-primary/20";
-            drawPage.classList.remove('hidden');
-            drawPage.classList.add('flex');
-            chatPage.classList.add('hidden');
-            chatPage.classList.remove('flex');
+        function addMsg(type, text) {
+            const list = document.getElementById("chatList");
+            const div = document.createElement("div");
+            div.className = "msg " + type;
+            div.innerText = text;
+            list.appendChild(div);
+            list.scrollTop = list.scrollHeight;
         }
 
-        // 密钥弹窗
-        const btnSetting = document.getElementById('btnSetting');
-        const settingModal = document.getElementById('settingModal');
-        const closeModal = document.getElementById('closeModal');
-        btnSetting.onclick = ()=>settingModal.style.display="flex";
-        closeModal.onclick = ()=>settingModal.style.display="none";
-
-        // 对话请求
-        const sendChat = document.getElementById('sendChat');
-        const chatInput = document.getElementById('chatInput');
-        const chatBox = document.getElementById('chatBox');
-        sendChat.onclick = async function(){
-            let text = chatInput.value.trim();
-            if(!text) return alert("请输入提问内容");
-            let selectModel = document.querySelector('input[name="chatModel"]:checked').value;
-            chatBox.innerHTML += `<div class="my-3"><p class="text-primary">用户：${text}</p></div>`;
-            chatBox.scrollTop = chatBox.scrollHeight;
-
-            if(selectModel === "batch"){
-                // 并行对比接口
-                let res = await fetch("/api/v1/chat_batch?prompt="+encodeURIComponent(text)).then(r=>r.json());
-                let html = `<div class="my-3 border-l-2 border-primary pl-3"><p>【多模型并行返回结果】</p>`;
-                if(res.data.doubao.status==="ok") html += `<p class="text-amber-300 mt-2">▶ 豆包：${res.data.doubao.content}</p>`;
-                if(res.data.deepseek.status==="ok") html += `<p class="text-blue-300 mt-2">▶ DeepSeek：${res.data.deepseek.content}</p>`;
-                if(res.data.qwen.status==="ok") html += `<p class="text-cyan-300 mt-2">▶ 通义千问：${res.data.qwen.content}</p>`;
-                html += `</div>`;
-                chatBox.innerHTML += html;
-            }else{
-                // 单模型对话
-                let res = await fetch("/api/v1/chat",{
-                    method:"POST",
-                    headers:{"Content-Type":"application/json"},
-                    body:JSON.stringify({
-                        model_type:selectModel,
-                        prompt:text,
-                        temperature:0.7
+        // 生成图片
+        async function genImage() {
+            const prompt = document.getElementById("drawInput").value.trim();
+            if(!prompt) return;
+            const imgBox = document.getElementById("img-box");
+            imgBox.innerHTML = "生成中，请稍等...";
+            try {
+                const res = await fetch(API_HOST + "/api/v1/image/generate", {
+                    method: "POST",
+                    headers: {"Content-Type":"application/json"},
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        width: 832,
+                        height: 1216,
+                        draw_type: "general_v2"
                     })
-                }).then(r=>r.json());
-                chatBox.innerHTML += `<div class="my-3 border-l-2 border-primary pl-3"><p>AI回复：${res.data.answer}</p></div>`;
-            }
-            chatInput.value = "";
-            chatBox.scrollTop = chatBox.scrollHeight;
-        }
-
-        // 绘图请求
-        const genImgBtn = document.getElementById('genImgBtn');
-        const imgResultBox = document.getElementById('imgResultBox');
-        genImgBtn.onclick = async function(){
-            let prompt = document.getElementById('posPrompt').value.trim();
-            let neg = document.getElementById('negPrompt').value;
-            let size = document.getElementById('imgSize').value;
-            let num = document.getElementById('imgNum').value;
-            let drawType = document.querySelector('input[name="drawModel"]:checked').value;
-            if(!prompt) return alert("请填写画面描述提示词");
-            genImgBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 生成中，请等待...';
-            genImgBtn.disabled = true;
-
-            let res = await fetch("/api/v1/image/generate",{
-                method:"POST",
-                headers:{"Content-Type":"application/json"},
-                body:JSON.stringify({
-                    draw_type:drawType,
-                    prompt:prompt,
-                    negative_prompt:neg,
-                    size:size,
-                    num:Number(num)
                 })
-            }).then(r=>r.json());
-
-            if(res.code!==200){
-                imgResultBox.innerHTML = `<p class="text-red-400">生成失败：${res.detail}</p>`;
-            }else{
-                let html = `<div class="grid grid-cols-2 gap-3">`;
-                res.data.image_urls.forEach(url=>{
-                    html += `<div class="rounded-lg overflow-hidden border border-darkBorder"><img src="${url}" class="w-full" loading="lazy"></div>`;
-                })
-                html += `</div>`;
-                imgResultBox.innerHTML = html;
+                const data = await res.json();
+                if(data.data?.image_url) {
+                    imgBox.innerHTML = `<img src="${data.data.image_url}" />`;
+                } else {
+                    imgBox.innerHTML = "生成失败：" + JSON.stringify(data);
+                }
+            } catch(e) {
+                imgBox.innerHTML = "网络错误";
             }
-            genImgBtn.innerHTML = '<i class="fa fa-magic"></i> 一键生成绘图';
-            genImgBtn.disabled = false;
         }
     </script>
 </body>
