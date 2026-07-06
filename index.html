@@ -108,7 +108,6 @@
     </style>
 </head>
 <body>
-    <!-- 左侧对话窗口 -->
     <div class="chat-panel">
         <h3>AI对话</h3>
         <div class="msg-container" id="chatBox"></div>
@@ -116,7 +115,6 @@
         <button onclick="sendChat()">发送对话</button>
     </div>
 
-    <!-- 右侧绘图窗口（支持自定义宽高） -->
     <div class="draw-panel">
         <h3>AI生图｜即梦AI</h3>
         <div class="img-show" id="imgBox"></div>
@@ -130,8 +128,6 @@
 
     <script>
         const API_BASE = "https://image-draw-api.onrender.com";
-
-        // 对话模块
         function addChatMsg(type, text) {
             const box = document.getElementById("chatBox");
             const div = document.createElement("div");
@@ -145,10 +141,8 @@
             if (!text) return;
             addChatMsg("user", text);
             document.getElementById("chatInput").value = "";
-            addChatMsg("ai", "对话接口暂未完善，仅绘图可用");
+            addChatMsg("ai", "对话接口已部署，填入模型即可使用，绘图功能优先测试");
         }
-
-        // 绘图模块（兼容后端width/height/model_type）
         async function genImage() {
             const prompt = document.getElementById("promptInput").value.trim();
             const w = parseInt(document.getElementById("wInput").value);
