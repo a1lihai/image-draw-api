@@ -172,86 +172,80 @@ class ModelAdapter:
             raise Exception(json_data.get("error_msg"))
         return [item["url"] for item in json_data["data"]]
 
-    # 即梦AI绘图 V4签名
-    @staticmethod
-    def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
-        import hmac
-        import hashlib
-        import json
-        from datetime import datetime
+   
 
-        server_utc = datetime.utcnow()
-        x_date = server_utc.strftime("%Y%m%dT%H:%M:%SZ")
-        date_short = server_utc.strftime("%Y%m%d")
+    # 即梦AI绘图 V4签名（彻底修复Header换行空白报错）
+@staticmethod
+def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
+    import hmac
+    import hashlib
+    import json
+    from datetime import datetime
 
-        cfg = CONF["jimeng"]
-        host = "visual.volcengineapi.com"
-        action = "CVProcess"
-        version = "2018-08-01"
-        url = f"https://{host}?Action={action}&Version={version}"
-        service = "cv"
-        region = "cn-north-1"
+    server_utc = datetime.utcnow()
+    x_date = server_utc.strftime("%Y%m%dT%H:%M:%SZ")
+    date_short = server_utc.strftime("%Y%m%d")
 
-        body = {
-            "ReqKey": cfg["req_key"],
-            "StableDiffusion": {
-                "Prompt": img_req.prompt,
-                "NegativePrompt": img_req.negative_prompt,
-                "ImageSize": img_req.size,
-                "Num": img_req.num
-            }
+    cfg = CONF["jimeng"]
+    host = "visual.volcengineapi.com"
+    action = "CVProcess"
+    version = "2018-08-01"
+    url = f"https://{host}?Action={action}&Version={version}"
+    service = "cv"
+    region = cfg.get("region", "cn-beijing")
+
+    body = {
+        "ReqKey": cfg["req_key"],
+        "StableDiffusion": {
+            "Prompt": img_req.prompt,
+            "NegativePrompt": img_req.negative_prompt,
+            "ImageSize": img_req.size,
+            "Num": img_req.num
         }
-        body_json = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
-        payload_sha256 = hashlib.sha256(body_json.encode("utf-8")).hexdigest()
+    }
+    body_json = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+    payload_sha256 = hashlib.sha256(body_json.encode("utf-8")).hexdigest()
 
-        method = "POST"
-        uri = "/"
-        query = f"Action={action}&Version={version}"
-        headers_raw = (
-            f"content-type:application/json; charset=utf-8\n"
-            f"host:{host}\n"
-            f"x-content-sha256:{payload_sha256}\n"
-            f"x-date:{x_date}\n"
-        )
-        signed_headers = "content-type;host;x-content-sha256;x-date"
-        canonical_req = (
-            f"{method}\n{uri}\n{query}\n{headers_raw}\n{signed_headers}\n{payload_sha256}"
-        )
+    method = "POST"
+    uri = "/"
+    query = f"Action={action}&Version={version}"
+    headers_raw = f"content-type:application/json; charset=utf-8\nhost:{host}\nx-content-sha256:{payload_sha256}\nx-date:{x_date}\n"
+    signed_headers = "content-type;host;x-content-sha256;x-date"
+    canonical_req = f"{method}\n{uri}\n{query}\n{headers_raw}\n{signed_headers}\n{payload_sha256}"
 
-        cr_sha256 = hashlib.sha256(canonical_req.encode("utf-8")).hexdigest()
-        scope = f"{date_short}/{region}/{service}/request"
-        string_to_sign = f"HMAC-SHA256\n{x_date}\n{scope}\n{cr_sha256}"
+    cr_sha256 = hashlib.sha256(canonical_req.encode("utf-8")).hexdigest()
+    scope = f"{date_short}/{region}/{service}/request"
+    string_to_sign = f"HMAC-SHA256\n{x_date}\n{scope}\n{cr_sha256}"
 
-        def hmac_sha256(key, msg):
-            return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+    def hmac_sha256(key, msg):
+        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
-        k_date = hmac_sha256(cfg["sk"].encode("utf-8"), date_short)
-        k_region = hmac_sha256(k_date, region)
-        k_service = hmac_sha256(k_region, service)
-        k_signing = hmac_sha256(k_service, "request")
-        sig = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    k_date = hmac_sha256(cfg["sk"].encode("utf-8"), date_short)
+    k_region = hmac_sha256(k_date, region)
+    k_service = hmac_sha256(k_region, service)
+    k_signing = hmac_sha256(k_service, "request")
+    sig = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
-        auth = (
-            f"HMAC-SHA256 Credential={cfg['ak']}/{scope}, "
-            f"SignedHeaders={signed_headers}, Signature={sig}"
-        )
-        headers = {
-            "Content-Type": "application/json; charset=utf-8",
-            "Host": host,
-            "X-Content-Sha256": payload_sha256,
-            "X-Date": x_date,
-            "Authorization": auth
-        }
+    # 关键：纯单行字符串，无任何换行拆分
+    auth = "HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}".format(cfg['ak'], scope, signed_headers, sig)
 
-        resp = requests.post(url, headers=headers, data=body_json, timeout=120)
-        res_json = resp.json()
-        logger.info(f"【即梦返回日志】{x_date} | {res_json}")
-        meta = res_json.get("ResponseMetadata", {})
-        err = meta.get("Error")
-        if err:
-            raise Exception(f"接口报错：{err['Code']} {err['Message']}")
-        img_list = [item["ImageUrl"] for item in res_json["Result"]["StableDiffusion"]["Images"]]
-        return img_list
+    # 请求头全部小写，去掉大写Host，和签名计算完全匹配
+    headers = {
+        "content-type": "application/json; charset=utf-8",
+        "x-content-sha256": payload_sha256,
+        "x-date": x_date,
+        "Authorization": auth
+    }
+
+    resp = requests.post(url, headers=headers, data=body_json, timeout=120)
+    res_json = resp.json()
+    logger.info(f"【即梦接口返回日志】{res_json}")
+    meta = res_json.get("ResponseMetadata", {})
+    err = meta.get("Error")
+    if err:
+        raise Exception(f"即梦接口错误：{err['Code']} {err['Message']}")
+    img_list = [item["ImageUrl"] for item in res_json["Result"]["StableDiffusion"]["Images"]]
+    return img_list
 
 # -------------------------- 业务API接口 --------------------------
 # 首页前端页面
