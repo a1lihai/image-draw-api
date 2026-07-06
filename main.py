@@ -171,10 +171,7 @@ class ModelAdapter:
         if json_data.get("error_code"):
             raise Exception(json_data.get("error_msg"))
         return [item["url"] for item in json_data["data"]]
-
-   
-
-    # 即梦AI绘图 V4签名（彻底修复Header换行空白报错）
+    # 即梦AI绘图 V4签名（彻底修复Header空格/换行报错）
 @staticmethod
 def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
     import hmac
@@ -226,10 +223,9 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
     k_signing = hmac_sha256(k_service, "request")
     sig = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
-    # 关键：纯单行字符串，无任何换行拆分
-    auth = "HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}".format(cfg['ak'], scope, signed_headers, sig)
+    # 关键修复：逗号后无任何空格，完全符合火山Header规范
+    auth = "HMAC-SHA256 Credential={}/{},SignedHeaders={},Signature={}".format(cfg['ak'], scope, signed_headers, sig)
 
-    # 请求头全部小写，去掉大写Host，和签名计算完全匹配
     headers = {
         "content-type": "application/json; charset=utf-8",
         "x-content-sha256": payload_sha256,
@@ -246,6 +242,7 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
         raise Exception(f"即梦接口错误：{err['Code']} {err['Message']}")
     img_list = [item["ImageUrl"] for item in res_json["Result"]["StableDiffusion"]["Images"]]
     return img_list
+   
 
 # -------------------------- 业务API接口 --------------------------
 # 首页前端页面
