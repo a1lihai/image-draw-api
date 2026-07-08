@@ -175,101 +175,101 @@ class ModelAdapter:
         return [item["url"] for item in data["data"]]
 
     # 【最终稳定版即梦签名】无斜杠丢失、无空格、无换行、大小写统一
-    @staticmethod
-    def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
-        import hmac
-        import hashlib
-        import json
-        from datetime import datetime
+   @staticmethod
+def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
+    import hmac
+    import hashlib
+    import json
+    from datetime import datetime
 
-        # UTC标准时间戳
-        now_utc = datetime.utcnow()
-        x_date = now_utc.strftime("%Y%m%dT%H:%M:%SZ")
-        date_short = now_utc.strftime("%Y%m%d")
+    # UTC标准时间戳
+    now_utc = datetime.utcnow()
+    x_date = now_utc.strftime("%Y%m%dT%H:%M:%SZ")
+    date_short = now_utc.strftime("%Y%m%d")
 
-        cfg = CONF["jimeng"]
-        host = "visual.volcengineapi.com"
-        # 官方固定必填参数，硬写死杜绝丢失Action/Version
-        action = "CVProcess"
-        version = "2022-08-31"
-        api_url = f"https://{host}?Action={action}&Version={version}"
-        service_name = "cv"
-        region = "cn-north-1"
+    cfg = CONF["jimeng"]
+    host = "visual.volcengineapi.com"
+    # 官方固定必填参数，硬写死杜绝丢失Action/Version
+    action = "CVProcess"
+    version = "2022-08-31"
+    api_url = f"https://{host}?Action={action}&Version={version}"
+    service_name = "cv"
+    region = "cn-north-1"
 
-        # 官方固定ReqKey，无需控制台创建应用
-        fixed_req_key = "jimeng_high_aes_general_v21_L"
+    # 官方固定ReqKey，无需控制台创建应用
+    fixed_req_key = "jimeng_high_aes_general_v21_L"
 
-        # 请求Body
-        req_body = {
-            "ReqKey": fixed_req_key,
-            "StableDiffusion": {
+    # 请求Body
+    req_body = {
+        "ReqKey": fixed_req_key,
+        "StableDiffusion": {
             "Prompt": img_req.prompt,
             "NegativePrompt": img_req.negative_prompt,
             "ImageSize": img_req.size,
             "Num": img_req.num
-          }
         }
-        body_raw = json.dumps(req_body, separators=(",", ":"), ensure_ascii=False)
-        body_sha256 = hashlib.sha256(body_raw.encode("utf-8")).hexdigest()
+    }
+    body_raw = json.dumps(req_body, separators=(",", ":"), ensure_ascii=False)
+    body_sha256 = hashlib.sha256(body_raw.encode("utf-8")).hexdigest()
 
-        http_method = "POST"
-        uri_path = "/"
-        query_str = f"Action={action}&Version={version}"
-        signed_header_keys = "content-type;host;x-content-sha256;x-date"
+    http_method = "POST"
+    uri_path = "/"
+    query_str = f"Action={action}&Version={version}"
+    signed_header_keys = "content-type;host;x-content-sha256;x-date"
 
-        # 规范签名头，硬编码换行，无隐形空格
-        canonical_header_lines = (
-            f"content-type:application/json; charset=utf-8\n"
-            f"host:{host}\n"
-            f"x-content-sha256:{body_sha256}\n"
-            f"x-date:{x_date}\n"
-        )
-        canonical_request = "\n".join([
-            http_method,
-            uri_path,
-            query_str,
-            canonical_header_lines.rstrip("\n"),
-            signed_header_keys,
-            body_sha256
-        ])
-        cr_sha = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
-        # scope强制分段，AK和region之间固定斜杠，绝不会丢失
-        scope = f"{date_short}/{region}/{service_name}/request"
-        string_to_sign = f"HMAC-SHA256\n{x_date}\n{scope}\n{cr_sha}"
+    # 规范签名头，硬编码换行，无隐形空格
+    canonical_header_lines = (
+        f"content-type:application/json; charset=utf-8\n"
+        f"host:{host}\n"
+        f"x-content-sha256:{body_sha256}\n"
+        f"x-date:{x_date}\n"
+    )
+    canonical_request = "\n".join([
+        http_method,
+        uri_path,
+        query_str,
+        canonical_header_lines.rstrip("\n"),
+        signed_header_keys,
+        body_sha256
+    ])
+    cr_sha = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+    # scope强制分段，AK和region之间固定斜杠，绝不会丢失
+    scope = f"{date_short}/{region}/{service_name}/request"
+    string_to_sign = f"HMAC-SHA256\n{x_date}\n{scope}\n{cr_sha}"
 
-        # HMAC签名推导函数
-        def hmac_256(key_bytes, msg):
-            return hmac.new(key_bytes, msg.encode("utf-8"), hashlib.sha256).digest()
+    # HMAC签名推导函数
+    def hmac_256(key_bytes, msg):
+        return hmac.new(key_bytes, msg.encode("utf-8"), hashlib.sha256).digest()
 
-        k_date = hmac_256(cfg["sk"].encode("utf-8"), date_short)
-        k_region = hmac_256(k_date, region)
-        k_service = hmac_256(k_region, service_name)
-        k_sign = hmac_256(k_service, "request")
-        final_signature = hmac.new(k_sign, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    k_date = hmac_256(cfg["sk"].encode("utf-8"), date_short)
+    k_region = hmac_256(k_date, region)
+    k_service = hmac_256(k_region, service_name)
+    k_sign = hmac_256(k_service, "request")
+    final_signature = hmac.new(k_sign, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
-        # 分段拼接鉴权串，逗号前后零空格，彻底解决空白字符报错
-        credential_segment = f"Credential={cfg['ak']}/{scope}"
-        signed_header_segment = f"SignedHeaders={signed_header_keys}"
-        signature_segment = f"Signature={final_signature}"
-        auth_header_value = f"HMAC-SHA256  {credential_segment},{signed_header_segment},{signature_segment}"
+    # 分段拼接鉴权串，逗号前后零空格，彻底解决空白字符报错
+    credential_segment = f"Credential={cfg['ak']}/{scope}"
+    signed_header_segment = f"SignedHeaders={signed_header_keys}"
+    signature_segment = f"Signature={final_signature}"
+    auth_header_value = f"HMAC-SHA256 {credential_segment},{signed_header_segment},{signature_segment}"
 
-        headers = {
-            "content-type": "application/json; charset=utf-8",
-            "x-content-sha256": body_sha256,
-            "x-date": x_date,
-            "Authorization": auth_header_value
-        }
+    headers = {
+        "content-type": "application/json; charset=utf-8",
+        "x-content-sha256": body_sha256,
+        "x-date": x_date,
+        "Authorization": auth_header_value
+    }
 
-        resp = requests.post(api_url, headers=headers, data=body_raw, timeout=120)
-        resp_data = resp.json()
-        logger.info(f"即梦接口完整返回日志: {resp_data}")
-        meta = resp_data.get("ResponseMetadata", {})
-        err_info = meta.get("Error")
-        if err_info:
-            raise Exception(f"火山API鉴权/生成失败：{err_info['Code']} - {err_info['Message']}")
+    resp = requests.post(api_url, headers=headers, data=body_raw, timeout=120)
+    resp_data = resp.json()
+    logger.info(f"即梦接口完整返回日志: {resp_data}")
+    meta = resp_data.get("ResponseMetadata", {})
+    err_info = meta.get("Error")
+    if err_info:
+        raise Exception(f"火山API鉴权/生成失败：{err_info['Code']} - {err_info['Message']}")
 
-        img_url_list = [item["ImageUrl"] for item in resp_data["Result"]["StableDiffusion"]["Images"]]
-        return img_url_list
+    img_url_list = [item["ImageUrl"] for item in resp_data["Result"]["StableDiffusion"]["Images"]]
+    return img_url_list
 # 首页前端页面
 @app.get("/")
 async def index():
