@@ -182,11 +182,14 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
     import json
     from datetime import datetime
 
-    # 强制生成UTC时间，兜底防止空值
+    # 全局清洗函数：移除所有换行、空格、制表符、回车
+    def clean_str(s: str) -> str:
+        return s.replace("\n", "").replace("\r", "").replace(" ", "").strip()
+
     now_utc = datetime.utcnow()
-    x_date = now_utc.strftime("%Y%m%dT%H:%M:%SZ")
-    date_short = now_utc.strftime("%Y%m%d")
-    # 兜底：如果日期为空，手动填充固定日期防止scope崩坏
+    x_date = clean_str(now_utc.strftime("%Y%m%dT%H:%M:%SZ"))
+    date_short = clean_str(now_utc.strftime("%Y%m%d"))
+    # 日期空值兜底
     if not date_short:
         date_short = "20260708"
 
@@ -199,8 +202,9 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
     region = "cn-north-1"
     fixed_req_key = "jimeng_high_aes_general_v21_L"
 
-    # 清理AK首尾斜杠，避免双斜杠
-    ak_clean = cfg["ak"].strip("/")
+    # 清洗AK，去首尾斜杠+清除换行
+    ak_raw = cfg["ak"]
+    ak_clean = clean_str(ak_raw).strip("/")
 
     req_body = {
         "ReqKey": fixed_req_key,
@@ -216,42 +220,43 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
 
     http_method = "POST"
     uri_path = "/"
-    query_str = f"Action={action}&Version={version}"
-    signed_header_keys = "content-type;host;x-content-sha256;x-date"
+    query_str = clean_str(f"Action={action}&Version={version}")
+    signed_header_keys = clean_str("content-type;host;x-content-sha256;x-date")
 
+    # 规范签名头（仅用于计算签名，不传入HTTP Header）
     canonical_header_lines = (
         f"content-type:application/json; charset=utf-8\n"
         f"host:{host}\n"
         f"x-content-sha256:{body_sha256}\n"
         f"x-date:{x_date}\n"
     )
-    canonical_request = "\n".join([
+    canonical_request = clean_str("\n".join([
         http_method,
         uri_path,
         query_str,
         canonical_header_lines.rstrip("\n"),
         signed_header_keys,
         body_sha256
-    ])
+    ]))
     cr_sha = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
-    # 此时date_short一定有值，scope格式完整
-    scope = f"{date_short}/{region}/{service_name}/request"
-    string_to_sign = f"HMAC-SHA256\n{x_date}\n{scope}\n{cr_sha}"
+    scope = clean_str(f"{date_short}/{region}/{service_name}/request")
+    string_to_sign = clean_str(f"HMAC-SHA256\n{x_date}\n{scope}\n{cr_sha}")
 
     def hmac_256(key_bytes, msg):
         return hmac.new(key_bytes, msg.encode("utf-8"), hashlib.sha256).digest()
 
-    k_date = hmac_256(cfg["sk"].encode("utf-8"), date_short)
+    sk_clean = clean_str(cfg["sk"])
+    k_date = hmac_256(sk_clean.encode("utf-8"), date_short)
     k_region = hmac_256(k_date, region)
     k_service = hmac_256(k_region, service_name)
     k_sign = hmac_256(k_service, "request")
-    final_signature = hmac.new(k_sign, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    final_signature = clean_str(hmac.new(k_sign, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest())
 
-    # 无空格分段拼接鉴权头
-    credential_segment = f"Credential={ak_clean}/{scope}"
-    signed_header_segment = f"SignedHeaders={signed_header_keys}"
-    signature_segment = f"Signature={final_signature}"
-    auth_header_value = f"HMAC-SHA256 {credential_segment},{signed_header_segment},{signature_segment}"
+    # 三段拼接，全程无任何换行、空格
+    credential_segment = clean_str(f"Credential={ak_clean}/{scope}")
+    signed_header_segment = clean_str(f"SignedHeaders={signed_header_keys}")
+    signature_segment = clean_str(f"Signature={final_signature}")
+    auth_header_value = clean_str(f"HMAC-SHA256 {credential_segment},{signed_header_segment},{signature_segment}")
 
     headers = {
         "content-type": "application/json; charset=utf-8",
@@ -269,7 +274,7 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
         raise Exception(f"火山API错误：{err_info['Code']} - {err_info['Message']}")
 
     img_url_list = [item["ImageUrl"] for item in resp_data["Result"]["StableDiffusion"]["Images"]]
-    return img_url_list 
+    return img_url_list
 # 首页前端页面
 @app.get("/")
 async def index():
