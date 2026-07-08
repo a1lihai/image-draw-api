@@ -1,296 +1,225 @@
-import time
-import logging
-import requests
+import hmac
+import hashlib
 import json
-from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, model_validator
+import requests
+import logging
+from datetime import datetime
+from typing import List
+from fastapi import FastAPI
+from pydantic import BaseModel
+from fastapi.responses import HTMLResponse
 import os
 
-# 日志初始化
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ai-gateway")
+# -------------------------- 全局日志 --------------------------
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
-# FastAPI 实例
-app = FastAPI(title="智聚AI绘图对话平台", version="2.0")
-app.mount("/static", StaticFiles(directory="."), name="static")
+# -------------------------- FastAPI实例 --------------------------
+app = FastAPI(title="Jimeng CVProcess Official Demo")
 
-# 全局配置读取
-CONF = {
-    "jimeng": {
-        "ak": os.getenv("JIMENG_AK"),
-        "sk": os.getenv("JIMENG_SK"),
-        "region": os.getenv("JIMENG_REGION", "cn-beijing"),
-        "req_key": os.getenv("JIMENG_REQ_KEY"),
-    },
-    "wenxin": {
-        "api_key": os.getenv("WENXIN_API_KEY"),
-        "secret_key": os.getenv("WENXIN_SECRET_KEY"),
-        "token_url": os.getenv("WENXIN_TOKEN_URL"),
-        "draw_url": os.getenv("WENXIN_DRAW_URL"),
-    },
-    "doubao": {
-        "api_key": os.getenv("DOUBAO_API_KEY"),
-        "endpoint": os.getenv("DOUBAO_ENDPOINT"),
-        "model_id": os.getenv("DOUBAO_MODEL_ID"),
-    },
-    "deepseek": {
-        "api_key": os.getenv("DEEPSEEK_API_KEY"),
-        "endpoint": os.getenv("DEEPSEEK_ENDPOINT"),
-        "model": os.getenv("DEEPSEEK_MODEL"),
-    },
-    "qwen": {
-        "api_key": os.getenv("QWEN_API_KEY"),
-        "endpoint": os.getenv("QWEN_ENDPOINT"),
-        "model": os.getenv("QWEN_MODEL"),
-    }
-}
+# -------------------------- 官方固定常量（不可修改） --------------------------
+HOST = "visual.volcengineapi.com"
+ACTION = "CVProcess"
+VERSION = "2022-08-01"
+SERVICE = "cv"
+REGION = "cn-north-1"
+# 官方固定ReqKey，无需控制台创建应用
+REQ_KEY = "jimeng_high_aes_general_v21_L"
 
-# 对话入参模型
-class UnifiedChatReq(BaseModel):
-    model_type: str
+# -------------------------- 环境配置读取 --------------------------
+class GlobalConfig:
+    def __init__(self):
+        self.ak = os.getenv("JIMENG_AK", "").strip()
+        self.sk = os.getenv("JIMENG_SK", "").strip()
+
+CONF = GlobalConfig()
+
+# -------------------------- 前端入参模型 --------------------------
+class ImageDrawReq(BaseModel):
     prompt: str
-    system_prompt: Optional[str] = Field(default="你是全能AI助手，回答简洁易懂")
-    temperature: float = Field(default=0.7, ge=0, le=1)
-    max_tokens: int = Field(default=1024, gt=0)
+    negative_prompt: str = ""
+    width: int = 832
+    height: int = 1216
+    num: int = 1
 
-# 绘图入参：兼容前端 model_type / width / height
-class UnifiedImageReq(BaseModel):
-    model_type: Optional[str] = None
-    draw_type: Optional[str] = None
-    prompt: str
-    negative_prompt: str = Field(default="模糊,低画质,畸形,水印,文字,丑脸,多余肢体")
-    width: Optional[int] = None
-    height: Optional[int] = None
-    size: Optional[str] = None
-    num: int = Field(default=1, ge=1, le=4)
-
-    @model_validator(mode="before")
-    def transform_input(cls, values):
-        # 前端model_type映射后端draw_type
-        if values.get("model_type") and not values.get("draw_type"):
-            values["draw_type"] = values["model_type"]
-        # 宽高自动拼接size
-        w = values.get("width")
-        h = values.get("height")
-        if w and h and not values.get("size"):
-            values["size"] = f"{w}x{h}"
-        if not values.get("draw_type"):
-            raise ValueError("必须传入 model_type，仅支持 wenxin / jimeng")
-        return values
-
-# 统一返回结构
-class CommonResp(BaseModel):
-    code: int
-    msg: str
-    data: Dict[str, Any]
-
-# 模型调度类
-class ModelAdapter:
-    # 豆包对话
-    @staticmethod
-    def call_doubao(req: UnifiedChatReq) -> str:
-        cfg = CONF["doubao"]
-        headers = {"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"}
-        payload = {
-            "model": cfg["model_id"],
-            "messages": [{"role": "system", "content": req.system_prompt}, {"role": "user", "content": req.prompt}],
-            "temperature": req.temperature,
-            "max_tokens": req.max_tokens
-        }
-        res = requests.post(cfg["endpoint"], headers=headers, json=payload, timeout=60)
-        if res.status_code != 200:
-            raise Exception(f"豆包请求异常: {res.text}")
-        return res.json()["choices"][0]["message"]["content"]
-
-    # DeepSeek对话
-    @staticmethod
-    def call_deepseek(req: UnifiedChatReq) -> str:
-        cfg = CONF["deepseek"]
-        headers = {"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"}
-        payload = {
-            "model": cfg["model"],
-            "messages": [{"role": "system", "content": req.system_prompt}, {"role": "user", "content": req.prompt}],
-            "temperature": req.temperature,
-            "max_tokens": req.max_tokens
-        }
-        res = requests.post(cfg["endpoint"], headers=headers, json=payload, timeout=60)
-        if res.status_code != 200:
-            raise Exception(f"DeepSeek请求异常: {res.text}")
-        return res.json()["choices"][0]["message"]["content"]
-
-    # 通义千问对话
-    @staticmethod
-    def call_qwen(req: UnifiedChatReq) -> str:
-        cfg = CONF["qwen"]
-        headers = {"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"}
-        full_prompt = f"{req.system_prompt}\n用户：{req.prompt}"
-        payload = {
-            "model": cfg["model"],
-            "input": {"messages": [{"role": "user", "content": full_prompt}]},
-            "parameters": {"temperature": req.temperature}
-        }
-        res = requests.post(cfg["endpoint"], headers=headers, json=payload, timeout=60)
-        if res.status_code != 200:
-            raise Exception(f"通义千问请求异常: {res.text}")
-        return res.json()["output"]["text"]
-
-    # 文心一格Token缓存
-    _wenxin_token_cache = {"token": "", "expire": 0}
-    @staticmethod
-    def get_wenxin_token() -> str:
-        cfg = CONF["wenxin"]
-        now = time.time()
-        cache = ModelAdapter._wenxin_token_cache
-        if cache["token"] and cache["expire"] > now + 120:
-            return cache["token"]
-        params = {"grant_type": "client_credentials", "client_id": cfg["api_key"], "client_secret": cfg["secret_key"]}
-        res = requests.get(cfg["token_url"], params=params, timeout=30)
-        data = res.json()
-        if "access_token" not in data:
-            raise Exception("文心密钥无效，获取Token失败")
-        cache["token"] = data["access_token"]
-        cache["expire"] = now + data["expires_in"]
-        return cache["token"]
-
-    # 文心一格绘图
-    @staticmethod
-    def call_wenxin_draw(img_req: UnifiedImageReq) -> List[str]:
-        token = ModelAdapter.get_wenxin_token()
-        cfg = CONF["wenxin"]
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        payload = {
-            "model": "ernie-vilg-v2",
-            "prompt": img_req.prompt,
-            "negative_prompt": img_req.negative_prompt,
-            "size": img_req.size,
-            "n": img_req.num
-        }
-        res = requests.post(cfg["draw_url"], headers=headers, json=payload, timeout=90)
-        data = res.json()
-        if data.get("error_code"):
-            raise Exception(data["error_msg"])
-        return [item["url"] for item in data["data"]]
-
-    # 【最终稳定版即梦签名】无斜杠丢失、无空格、无换行、大小写统一
-  import hmac
-import hashlib
-from datetime import datetime
-
-def get_auth_header(ak, sk, region, service, date_short, x_date, canonical_request):
-    k_date = hmac.new(sk.encode("utf-8"), date_short.encode("utf-8"), hashlib.sha256).digest()
+# -------------------------- 火山官方原版V4签名函数（照搬官方仓库demo） --------------------------
+def get_signing_key(secret_key: str, date_stamp: str, region: str, service: str):
+    k_date = hmac.new(secret_key.encode("utf-8"), date_stamp.encode("utf-8"), hashlib.sha256).digest()
     k_region = hmac.new(k_date, region.encode("utf-8"), hashlib.sha256).digest()
     k_service = hmac.new(k_region, service.encode("utf-8"), hashlib.sha256).digest()
     k_signing = hmac.new(k_service, b"request", hashlib.sha256).digest()
+    return k_signing
 
-    cr_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
-    string_to_sign = f"HMAC-SHA256\n{x_date}\n{date_short}/{region}/{service}/request\n{cr_hash}"
-    signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
-    return f"HMAC-SHA256 Credential={ak.strip('/')}/{date_short}/{region}/{service}/request,SignedHeaders=content-type;host;x-content-sha256;x-date,Signature={signature}"
+def calc_authorization(ak: str, sk: str, x_date: str, date_stamp: str, canonical_req: str):
+    # 1. 计算规范请求哈希
+    cr_hash = hashlib.sha256(canonical_req.encode("utf-8")).hexdigest()
+    # 2. 构造待签名字符串（官方固定格式）
+    credential_scope = f"{date_stamp}/{REGION}/{SERVICE}/request"
+    string_to_sign = f"HMAC-SHA256\n{x_date}\n{credential_scope}\n{cr_hash}"
+    # 3. 分层推导签名密钥
+    signing_key = get_signing_key(sk, date_stamp, REGION, SERVICE)
+    signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    # 4. 拼接单行鉴权头，逗号无空格、无任何换行（核心修复报错）
+    auth_header = (
+        f"HMAC-SHA256 "
+        f"Credential={ak.strip('/')}/{credential_scope},"
+        f"SignedHeaders=content-type;host;x-content-sha256;x-date,"
+        f"Signature={signature}"
+    )
+    return auth_header
 
-@staticmethod
-def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
-    import json
-    cfg = CONF["jimeng"]
-    host = "visual.volcengineapi.com"
-    url = f"https://{host}?Action=CVProcess&Version=2022-08-31"
-    req_key = "jimeng_high_aes_general_v21_L"
-    region = "cn-north-1"
-    service = "cv"
+# -------------------------- 官方标准即梦绘图调用逻辑 --------------------------
+def jimeng_cvprocess_draw(req: ImageDrawReq) -> List[str]:
+    ak = CONF.ak
+    sk = CONF.sk
+    if not ak or not sk:
+        raise Exception("缺失环境变量 JIMENG_AK / JIMENG_SK")
 
-    now = datetime.utcnow()
-    x_date = now.strftime("%Y%m%dT%H:%M:%SZ")
-    date_short = now.strftime("%Y%m%d") or "20260708"
+    # UTC标准时间，兜底防止空日期
+    now_utc = datetime.utcnow()
+    x_date = now_utc.strftime("%Y%m%dT%H:%M:%SZ")
+    date_stamp = now_utc.strftime("%Y%m%d")
+    if not date_stamp:
+        date_stamp = "20260708"
 
+    # 1. 构造业务Body（CVProcess标准结构）
     body = {
-        "ReqKey": req_key,
+        "ReqKey": REQ_KEY,
         "StableDiffusion": {
-            "Prompt": img_req.prompt,
-            "NegativePrompt": img_req.negative_prompt,
-            "ImageSize": img_req.size,
-            "Num": img_req.num
+            "Prompt": req.prompt,
+            "NegativePrompt": req.negative_prompt,
+            "ImageSize": f"{req.width}*{req.height}",
+            "Num": req.num
         }
     }
-    body_bin = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    body_sha256 = hashlib.sha256(body_bin).hexdigest()
+    body_bytes = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body_sha256 = hashlib.sha256(body_bytes).hexdigest()
 
-    canonical_headers = f"content-type:application/json; charset=utf-8\nhost:{host}\nx-content-sha256:{body_sha256}\nx-date:{x_date}\n"
-    signed_headers = "content-type;host;x-content-sha256;x-date"
-    canonical_req = f"POST\n/\nAction=CVProcess&Version=2022-08-31\n{canonical_headers}\n{signed_headers}\n{body_sha256}"
+    # 2. 构造规范请求串（仅签名计算使用换行，不会流入HTTP头）
+    query_str = f"Action={ACTION}&Version={VERSION}"
+    canonical_headers = (
+        f"content-type:application/json; charset=utf-8\n"
+        f"host:{HOST}\n"
+        f"x-content-sha256:{body_sha256}\n"
+        f"x-date:{x_date}\n"
+    )
+    signed_header_list = "content-type;host;x-content-sha256;x-date"
+    canonical_request = "\n".join([
+        "POST",
+        "/",
+        query_str,
+        canonical_headers.rstrip("\n"),
+        signed_header_list,
+        body_sha256
+    ])
 
-    auth = get_auth_header(cfg["ak"], cfg["sk"], region, service, date_short, x_date, canonical_req)
+    # 3. 生成单行无换行鉴权头
+    auth_value = calc_authorization(ak, sk, x_date, date_stamp, canonical_request)
     headers = {
         "Content-Type": "application/json; charset=utf-8",
         "X-Content-Sha256": body_sha256,
         "X-Date": x_date,
-        "Authorization": auth
+        "Authorization": auth_value
     }
-    resp = requests.post(url, headers=headers, data=body_bin, timeout=120)
-    resp_data = resp.json()
-    logger.info(resp_data)
-    err = resp_data.get("ResponseMetadata", {}).get("Error")
-    if err:
-        raise Exception(f"{err['Code']}: {err['Message']}")
-    return [item["ImageUrl"] for item in resp_data["Result"]["StableDiffusion"]["Images"]]
 
-# 对话接口
-@app.post("/api/v1/chat", response_model=CommonResp)
-def chat_endpoint(body: UnifiedChatReq):
-    start = time.time()
-    dispatch_map = {
-        "doubao": ModelAdapter.call_doubao,
-        "deepseek": ModelAdapter.call_deepseek,
-        "qwen": ModelAdapter.call_qwen
+    # 4. 发起POST请求
+    api_url = f"https://{HOST}?{query_str}"
+    resp = requests.post(api_url, headers=headers, data=body_bytes, timeout=120)
+    resp_json = resp.json()
+    logger.info(f"火山接口完整返回日志: {resp_json}")
+
+    # 捕获火山业务错误
+    meta_info = resp_json.get("ResponseMetadata", {})
+    err_info = meta_info.get("Error")
+    if err_info:
+        raise Exception(f"{err_info['Code']} | {err_info['Message']}")
+
+    # 提取图片链接
+    img_items = resp_json["Result"]["StableDiffusion"]["Images"]
+    return [item["ImageUrl"] for item in img_items]
+
+# -------------------------- 绘图POST业务接口 --------------------------
+@app.post("/api/v1/image/generate")
+def api_generate_image(body: ImageDrawReq):
+    try:
+        img_urls = jimeng_cvprocess_draw(body)
+        return {"code": 0, "msg": "生成成功", "data": {"image_urls": img_urls}}
+    except Exception as e:
+        logger.error(f"绘图失败：{str(e)}")
+        return {"code": -1, "detail": str(e)}
+
+# -------------------------- 前端首页页面 --------------------------
+@app.get("/", response_class=HTMLResponse)
+def html_index():
+    page_html = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>即梦AI绘图官方Demo</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:system-ui}
+.wrap{max-width:620px;margin:40px auto;padding:0 16px}
+.card{border:1px solid #e5e7eb;border-radius:14px;padding:24px}
+h2{margin-bottom:20px;color:#1f2937}
+textarea,input{width:100%;padding:12px;border:1px solid #d1d5db;border-radius:8px;margin-bottom:14px;font-size:14px}
+textarea{height:110px;resize:none}
+.row{display:flex;gap:12px}
+button{width:100%;padding:14px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:500}
+#result{margin-top:20px;white-space:pre-wrap;color:#dc2626;font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="card">
+<h2>AI生图 | 即梦CVProcess官方对接</h2>
+<textarea id="prompt" placeholder="正向提示词，描述画面内容"></textarea>
+<textarea id="neg" placeholder="反向提示词，规避瑕疵"></textarea>
+<div class="row">
+<input type="number" id="w" value="832" placeholder="宽度">
+<input type="number" id="h" value="1216" placeholder="高度">
+</div>
+<button onclick="submitDraw()">一键生成图片</button>
+<div id="result"></div>
+</div>
+</div>
+<script>
+async function submitDraw(){
+    const resBox = document.getElementById("result");
+    resBox.innerText = "接口请求中，请稍候...";
+    const payload = {
+        prompt: document.getElementById("prompt").value,
+        negative_prompt: document.getElementById("neg").value,
+        width: Number(document.getElementById("w").value),
+        height: Number(document.getElementById("h").value),
+        num: 1
+    };
+    try{
+        const fetchResp = await fetch("/api/v1/image/generate",{
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        });
+        const data = await fetchResp.json();
+        if(data.code === 0){
+            resBox.style.color = "#16a34a";
+            resBox.innerText = "✅ 生成成功\n图片链接：\n" + data.data.image_urls.join("\n");
+        }else{
+            resBox.style.color = "#dc2626";
+            resBox.innerText = "❌ 生成失败\n" + JSON.stringify(data, null, 2);
+        }
+    }catch(err){
+        resBox.style.color = "#dc2626";
+        resBox.innerText = "网络异常：" + err.toString();
     }
-    if body.model_type not in dispatch_map:
-        raise HTTPException(status_code=400, detail="仅支持 doubao / deepseek / qwen")
-    try:
-        ans = dispatch_map[body.model_type](body)
-        return CommonResp(
-            code=200,
-            msg="对话成功",
-            data={
-                "model": body.model_type,
-                "answer": ans,
-                "cost_ms": round((time.time() - start) * 1000, 2)
-            }
-        )
-    except Exception as e:
-        logger.error("对话接口异常", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+}
+</script>
+</body>
+</html>
+    """
+    return page_html
 
-# 绘图主接口
-@app.post("/api/v1/image/generate", response_model=CommonResp)
-def draw_endpoint(body: UnifiedImageReq):
-    start = time.time()
-    try:
-        if body.draw_type == "wenxin":
-            urls = ModelAdapter.call_wenxin_draw(body)
-        elif body.draw_type == "jimeng":
-            urls = ModelAdapter.call_jimeng_draw(body)
-        else:
-            raise HTTPException(status_code=400, detail="仅支持 wenxin 文心一格 / jimeng 即梦AI")
-        return CommonResp(
-            code=200,
-            msg="绘图完成",
-            data={
-                "draw_model": body.draw_type,
-                "image_urls": urls,
-                "cost_ms": round((time.time() - start) * 1000, 2)
-            }
-        )
-    except Exception as e:
-        logger.error("绘图全局异常", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-# 健康检测
-@app.get("/health")
-def health_check():
-    return {"code": 200, "msg": "服务正常运行"}
-
-# 启动入口
+# -------------------------- 本地启动入口（Render兼容） --------------------------
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
