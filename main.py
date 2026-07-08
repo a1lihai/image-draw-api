@@ -175,39 +175,37 @@ class ModelAdapter:
         return [item["url"] for item in data["data"]]
 
     # 【最终稳定版即梦签名】无斜杠丢失、无空格、无换行、大小写统一
-   @staticmethod
+  import hmac
+import hashlib
+from datetime import datetime
+
+def get_auth_header(ak, sk, region, service, date_short, x_date, canonical_request):
+    k_date = hmac.new(sk.encode("utf-8"), date_short.encode("utf-8"), hashlib.sha256).digest()
+    k_region = hmac.new(k_date, region.encode("utf-8"), hashlib.sha256).digest()
+    k_service = hmac.new(k_region, service.encode("utf-8"), hashlib.sha256).digest()
+    k_signing = hmac.new(k_service, b"request", hashlib.sha256).digest()
+
+    cr_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+    string_to_sign = f"HMAC-SHA256\n{x_date}\n{date_short}/{region}/{service}/request\n{cr_hash}"
+    signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"HMAC-SHA256 Credential={ak.strip('/')}/{date_short}/{region}/{service}/request,SignedHeaders=content-type;host;x-content-sha256;x-date,Signature={signature}"
+
+@staticmethod
 def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
-    import hmac
-    import hashlib
     import json
-    from datetime import datetime
-
-    # 全局清洗函数：移除所有换行、空格、制表符、回车
-    def clean_str(s: str) -> str:
-        return s.replace("\n", "").replace("\r", "").replace(" ", "").strip()
-
-    now_utc = datetime.utcnow()
-    x_date = clean_str(now_utc.strftime("%Y%m%dT%H:%M:%SZ"))
-    date_short = clean_str(now_utc.strftime("%Y%m%d"))
-    # 日期空值兜底
-    if not date_short:
-        date_short = "20260708"
-
     cfg = CONF["jimeng"]
     host = "visual.volcengineapi.com"
-    action = "CVProcess"
-    version = "2022-08-31"
-    api_url = f"https://{host}?Action={action}&Version={version}"
-    service_name = "cv"
+    url = f"https://{host}?Action=CVProcess&Version=2022-08-31"
+    req_key = "jimeng_high_aes_general_v21_L"
     region = "cn-north-1"
-    fixed_req_key = "jimeng_high_aes_general_v21_L"
+    service = "cv"
 
-    # 清洗AK，去首尾斜杠+清除换行
-    ak_raw = cfg["ak"]
-    ak_clean = clean_str(ak_raw).strip("/")
+    now = datetime.utcnow()
+    x_date = now.strftime("%Y%m%dT%H:%M:%SZ")
+    date_short = now.strftime("%Y%m%d") or "20260708"
 
-    req_body = {
-        "ReqKey": fixed_req_key,
+    body = {
+        "ReqKey": req_key,
         "StableDiffusion": {
             "Prompt": img_req.prompt,
             "NegativePrompt": img_req.negative_prompt,
@@ -215,70 +213,27 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
             "Num": img_req.num
         }
     }
-    body_raw = json.dumps(req_body, separators=(",", ":"), ensure_ascii=False)
-    body_sha256 = hashlib.sha256(body_raw.encode("utf-8")).hexdigest()
+    body_bin = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body_sha256 = hashlib.sha256(body_bin).hexdigest()
 
-    http_method = "POST"
-    uri_path = "/"
-    query_str = clean_str(f"Action={action}&Version={version}")
-    signed_header_keys = clean_str("content-type;host;x-content-sha256;x-date")
+    canonical_headers = f"content-type:application/json; charset=utf-8\nhost:{host}\nx-content-sha256:{body_sha256}\nx-date:{x_date}\n"
+    signed_headers = "content-type;host;x-content-sha256;x-date"
+    canonical_req = f"POST\n/\nAction=CVProcess&Version=2022-08-31\n{canonical_headers}\n{signed_headers}\n{body_sha256}"
 
-    # 规范签名头（仅用于计算签名，不传入HTTP Header）
-    canonical_header_lines = (
-        f"content-type:application/json; charset=utf-8\n"
-        f"host:{host}\n"
-        f"x-content-sha256:{body_sha256}\n"
-        f"x-date:{x_date}\n"
-    )
-    canonical_request = clean_str("\n".join([
-        http_method,
-        uri_path,
-        query_str,
-        canonical_header_lines.rstrip("\n"),
-        signed_header_keys,
-        body_sha256
-    ]))
-    cr_sha = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
-    scope = clean_str(f"{date_short}/{region}/{service_name}/request")
-    string_to_sign = clean_str(f"HMAC-SHA256\n{x_date}\n{scope}\n{cr_sha}")
-
-    def hmac_256(key_bytes, msg):
-        return hmac.new(key_bytes, msg.encode("utf-8"), hashlib.sha256).digest()
-
-    sk_clean = clean_str(cfg["sk"])
-    k_date = hmac_256(sk_clean.encode("utf-8"), date_short)
-    k_region = hmac_256(k_date, region)
-    k_service = hmac_256(k_region, service_name)
-    k_sign = hmac_256(k_service, "request")
-    final_signature = clean_str(hmac.new(k_sign, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest())
-
-    # 三段拼接，全程无任何换行、空格
-    credential_segment = clean_str(f"Credential={ak_clean}/{scope}")
-    signed_header_segment = clean_str(f"SignedHeaders={signed_header_keys}")
-    signature_segment = clean_str(f"Signature={final_signature}")
-    auth_header_value = clean_str(f"HMAC-SHA256 {credential_segment},{signed_header_segment},{signature_segment}")
-
+    auth = get_auth_header(cfg["ak"], cfg["sk"], region, service, date_short, x_date, canonical_req)
     headers = {
-        "content-type": "application/json; charset=utf-8",
-        "x-content-sha256": body_sha256,
-        "x-date": x_date,
-        "Authorization": auth_header_value
+        "Content-Type": "application/json; charset=utf-8",
+        "X-Content-Sha256": body_sha256,
+        "X-Date": x_date,
+        "Authorization": auth
     }
-
-    resp = requests.post(api_url, headers=headers, data=body_raw, timeout=120)
+    resp = requests.post(url, headers=headers, data=body_bin, timeout=120)
     resp_data = resp.json()
-    logger.info(f"接口完整返回日志: {resp_data}")
-    meta = resp_data.get("ResponseMetadata", {})
-    err_info = meta.get("Error")
-    if err_info:
-        raise Exception(f"火山API错误：{err_info['Code']} - {err_info['Message']}")
-
-    img_url_list = [item["ImageUrl"] for item in resp_data["Result"]["StableDiffusion"]["Images"]]
-    return img_url_list
-# 首页前端页面
-@app.get("/")
-async def index():
-    return FileResponse("index.html")
+    logger.info(resp_data)
+    err = resp_data.get("ResponseMetadata", {}).get("Error")
+    if err:
+        raise Exception(f"{err['Code']}: {err['Message']}")
+    return [item["ImageUrl"] for item in resp_data["Result"]["StableDiffusion"]["Images"]]
 
 # 对话接口
 @app.post("/api/v1/chat", response_model=CommonResp)
