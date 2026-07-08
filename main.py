@@ -269,7 +269,7 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
         raise Exception(f"火山API错误：{err_info['Code']} - {err_info['Message']}")
 
     img_url_list = [item["ImageUrl"] for item in resp_data["Result"]["StableDiffusion"]["Images"]]
-    return img_url_list
+    return img_url_list 
 # 首页前端页面
 @app.get("/")
 async def index():
