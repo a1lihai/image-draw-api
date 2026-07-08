@@ -182,24 +182,26 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
     import json
     from datetime import datetime
 
-    # UTC标准时间戳
+    # 强制生成UTC时间，兜底防止空值
     now_utc = datetime.utcnow()
     x_date = now_utc.strftime("%Y%m%dT%H:%M:%SZ")
     date_short = now_utc.strftime("%Y%m%d")
+    # 兜底：如果日期为空，手动填充固定日期防止scope崩坏
+    if not date_short:
+        date_short = "20260708"
 
     cfg = CONF["jimeng"]
     host = "visual.volcengineapi.com"
-    # 官方固定必填参数，硬写死杜绝丢失Action/Version
     action = "CVProcess"
     version = "2022-08-31"
     api_url = f"https://{host}?Action={action}&Version={version}"
     service_name = "cv"
     region = "cn-north-1"
-
-    # 官方固定ReqKey，无需控制台创建应用
     fixed_req_key = "jimeng_high_aes_general_v21_L"
 
-    # 请求Body
+    # 清理AK首尾斜杠，避免双斜杠
+    ak_clean = cfg["ak"].strip("/")
+
     req_body = {
         "ReqKey": fixed_req_key,
         "StableDiffusion": {
@@ -217,7 +219,6 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
     query_str = f"Action={action}&Version={version}"
     signed_header_keys = "content-type;host;x-content-sha256;x-date"
 
-    # 规范签名头，硬编码换行，无隐形空格
     canonical_header_lines = (
         f"content-type:application/json; charset=utf-8\n"
         f"host:{host}\n"
@@ -233,11 +234,10 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
         body_sha256
     ])
     cr_sha = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
-    # scope强制分段，AK和region之间固定斜杠，绝不会丢失
+    # 此时date_short一定有值，scope格式完整
     scope = f"{date_short}/{region}/{service_name}/request"
     string_to_sign = f"HMAC-SHA256\n{x_date}\n{scope}\n{cr_sha}"
 
-    # HMAC签名推导函数
     def hmac_256(key_bytes, msg):
         return hmac.new(key_bytes, msg.encode("utf-8"), hashlib.sha256).digest()
 
@@ -247,8 +247,8 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
     k_sign = hmac_256(k_service, "request")
     final_signature = hmac.new(k_sign, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
-    # 分段拼接鉴权串，逗号前后零空格，彻底解决空白字符报错
-    credential_segment = f"Credential={cfg['ak']}/{scope}"
+    # 无空格分段拼接鉴权头
+    credential_segment = f"Credential={ak_clean}/{scope}"
     signed_header_segment = f"SignedHeaders={signed_header_keys}"
     signature_segment = f"Signature={final_signature}"
     auth_header_value = f"HMAC-SHA256 {credential_segment},{signed_header_segment},{signature_segment}"
@@ -262,11 +262,11 @@ def call_jimeng_draw(img_req: UnifiedImageReq) -> List[str]:
 
     resp = requests.post(api_url, headers=headers, data=body_raw, timeout=120)
     resp_data = resp.json()
-    logger.info(f"即梦接口完整返回日志: {resp_data}")
+    logger.info(f"接口完整返回日志: {resp_data}")
     meta = resp_data.get("ResponseMetadata", {})
     err_info = meta.get("Error")
     if err_info:
-        raise Exception(f"火山API鉴权/生成失败：{err_info['Code']} - {err_info['Message']}")
+        raise Exception(f"火山API错误：{err_info['Code']} - {err_info['Message']}")
 
     img_url_list = [item["ImageUrl"] for item in resp_data["Result"]["StableDiffusion"]["Images"]]
     return img_url_list
