@@ -2,185 +2,111 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智聚AI | 对话绘图一体化工具</title>
+    <title>模库AI | 即梦AI绘图</title>
     <style>
         * {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
-            font-family: "Microsoft YaHei", system-ui;
+            font-family: system-ui, sans-serif;
         }
-        body {
-            background: #f5f7fa;
-            display: flex;
-            height: 100vh;
-            gap: 20px;
-            padding: 20px;
+        .container {
+            max-width: 640px;
+            margin: 40px auto;
+            padding: 0 20px;
         }
-        .chat-panel, .draw-panel {
-            width: 48%;
-            background: #ffffff;
-            border-radius: 14px;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 2px 12px #0000000f;
+        .card {
+            border: 1px solid #e5e7eb;
+            border-radius: 16px;
+            padding: 28px;
         }
-        h3 {
-            font-size: 18px;
-            margin-bottom: 14px;
-            color: #222;
+        h1 {
+            font-size: 22px;
+            margin-bottom: 24px;
+            color: #111827;
         }
-        .msg-container {
-            flex: 1;
-            border: 1px solid #e8e8e8;
-            border-radius: 10px;
-            padding: 12px;
-            overflow-y: auto;
-            margin-bottom: 12px;
-        }
-        .msg {
-            margin: 8px 0;
-            padding: 9px 13px;
-            border-radius: 10px;
-            max-width: 82%;
-            line-height: 1.5;
-        }
-        .user-msg {
-            background: #1677ff;
-            color: white;
-            margin-left: auto;
-        }
-        .ai-msg {
-            background: #f0f2f5;
-            color: #1f1f1f;
-            margin-right: auto;
-        }
-        textarea {
+        textarea, input {
             width: 100%;
-            height: 90px;
-            padding: 11px;
-            border: 1px solid #ddd;
+            padding: 12px 14px;
+            border: 1px solid #d1d5db;
             border-radius: 10px;
-            resize: none;
+            margin-bottom: 16px;
             font-size: 14px;
         }
-        .row-input {
-            display: flex;
-            gap: 10px;
-            margin: 10px 0;
+        textarea {
+            height: 120px;
+            resize: none;
         }
-        .row-input input {
-            flex: 1;
-            padding: 9px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
+        .size-row {
+            display: flex;
+            gap: 14px;
         }
         button {
-            margin-top: 10px;
             width: 100%;
-            padding: 12px;
-            background: #1677ff;
-            color: #fff;
+            padding: 14px;
+            background-color: #2563eb;
+            color: white;
             border: none;
             border-radius: 10px;
-            font-size: 15px;
+            font-size: 16px;
+            font-weight: 500;
             cursor: pointer;
         }
-        button:active {
-            background: #0f5fcc;
+        #result-box {
+            margin-top: 22px;
+            white-space: pre-wrap;
+            font-size: 14px;
         }
-        .img-show {
-            flex: 1;
-            border: 1px solid #e8e8e8;
-            border-radius: 10px;
-            padding: 12px;
-            overflow-y: auto;
-            margin-bottom: 12px;
-            min-height: 320px;
-        }
-        .img-show img {
-            max-width: 100%;
-            border-radius: 8px;
-            margin: 6px 0;
-        }
+        .success {color: #16a34a;}
+        .error {color: #dc2626;}
     </style>
 </head>
 <body>
-    <div class="chat-panel">
-        <h3>AI对话</h3>
-        <div class="msg-container" id="chatBox"></div>
-        <textarea id="chatInput" placeholder="输入对话内容..."></textarea>
-        <button onclick="sendChat()">发送对话</button>
-    </div>
-
-    <div class="draw-panel">
-        <h3>AI生图｜即梦AI</h3>
-        <div class="img-show" id="imgBox"></div>
-        <textarea id="promptInput" placeholder="正向提示词，描述画面"></textarea>
-        <div class="row-input">
-            <input type="number" id="wInput" value="832" placeholder="宽度">
-            <input type="number" id="hInput" value="1216" placeholder="高度">
+<div class="container">
+    <div class="card">
+        <h1>模库AI · 即梦文生图</h1>
+        <textarea id="prompt" placeholder="正向提示词，描述画面细节"></textarea>
+        <textarea id="neg-prompt" placeholder="反向提示词，规避畸形、模糊"></textarea>
+        <div class="size-row">
+            <input type="number" id="w" value="832" placeholder="宽度">
+            <input type="number" id="h" value="1216" placeholder="高度">
         </div>
-        <button onclick="genImage()">一键生成图片</button>
+        <button onclick="submitDraw()">一键生成图片</button>
+        <div id="result-box"></div>
     </div>
-
-    <script>
-        const API_BASE = "https://image-draw-api.onrender.com";
-        function addChatMsg(type, text) {
-            const box = document.getElementById("chatBox");
-            const div = document.createElement("div");
-            div.className = type === "user" ? "msg user-msg" : "msg ai-msg";
-            div.innerText = text;
-            box.appendChild(div);
-            box.scrollTop = box.scrollHeight;
-        }
-        async function sendChat() {
-            const text = document.getElementById("chatInput").value.trim();
-            if (!text) return;
-            addChatMsg("user", text);
-            document.getElementById("chatInput").value = "";
-            addChatMsg("ai", "对话接口已部署，填入模型即可使用，绘图功能优先测试");
-        }
-        async function genImage() {
-            const prompt = document.getElementById("promptInput").value.trim();
-            const w = parseInt(document.getElementById("wInput").value);
-            const h = parseInt(document.getElementById("hInput").value);
-            if (!prompt || !w || !h) {
-                document.getElementById("imgBox").innerText = "请填写提示词、宽高数值";
-                return;
+</div>
+<script>
+    async function submitDraw() {
+        const resBox = document.getElementById("result-box");
+        resBox.className = "";
+        resBox.innerText = "正在请求接口，请等待...";
+        const payload = {
+            prompt: document.getElementById("prompt").value.trim(),
+            negative_prompt: document.getElementById("neg-prompt").value.trim(),
+            width: Number(document.getElementById("w").value),
+            height: Number(document.getElementById("h").value),
+            num: 1
+        };
+        try {
+            const fetchRes = await fetch("/api/v1/image/generate", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(payload),
+                cache: "no-cache"
+            });
+            const data = await fetchRes.json();
+            if (data.code === 0) {
+                resBox.className = "success";
+                resBox.innerText = "✅ 生成成功！图片链接：\n" + data.data.image_urls.join("\n");
+            } else {
+                resBox.className = "error";
+                resBox.innerText = "❌ 生成失败：\n" + data.detail;
             }
-            const imgBox = document.getElementById("imgBox");
-            imgBox.innerText = "生成中，请等待，免费Render休眠会慢一点...";
-            try {
-                const res = await fetch(`${API_BASE}/api/v1/image/generate`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        model_type: "jimeng",
-                        prompt: prompt,
-                        width: w,
-                        height: h,
-                        num: 1
-                    })
-                });
-                const data = await res.json();
-                if (data.code === 200 && data.data.image_urls) {
-                    let html = "";
-                    data.data.image_urls.forEach(url => {
-                        html += `<img src="${url}" alt="生成图">`;
-                    });
-                    imgBox.innerHTML = html;
-                } else {
-                    imgBox.innerText = "生成失败：" + JSON.stringify(data);
-                }
-            } catch (err) {
-                imgBox.innerText = "网络异常：" + err.toString();
-            }
+        } catch (err) {
+            resBox.className = "error";
+            resBox.innerText = "网络请求异常：" + err.toString();
         }
-    </script>
+    }
+</script>
 </body>
 </html>
